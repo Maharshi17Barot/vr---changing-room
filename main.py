@@ -1,82 +1,44 @@
-import os
+import numpy as np
 import cv2
-import cvzone
-from cvzone.PoseModule import PoseDetector
 
+face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+eye_cascade = cv2.CascadeClassifier('haarcascade_eye.xml')
+sunglasses = cv2.imread('glasses.png')
 cap = cv2.VideoCapture(0)
 
-if not cap.isOpened():
-    print("Failed to open camera.")
-    exit()
+while 1:
+    ret, img = cap.read()
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
-detector = PoseDetector()
-shirtFolderPath = "Resources/Shirts"
-listShirts = os.listdir(shirtFolderPath)
-imageNumber = 0
+    for (x, y, w, h) in faces:
+        if h > 0 and w > 0:
+            h, w = int(1.4 * h), int(1.2 * w)
+            y += 25
+            x -= 17
 
-imgButtonRight = cv2.imread("Resources/button.png", cv2.IMREAD_UNCHANGED)
-imgButtonLeft = cv2.flip(imgButtonRight, 1)
-counterRight = 0
-counterLeft = 0
-selectionSpeed = 10
+        eye = eye_cascade.detectMultiScale(gray, 1.3, 9)
+        for (ex, ey, ew, eh) in eye:
+            if eh > 0 and ew > 0:
+                eh, ew = int(3 * eh), int(4.5 * ew)
+                ey -= 30
+                ex -= 50
 
-while True:
-    success, img = cap.read()
-    if not success:
-        print("Failed to read frame from camera.")
-        break
+                img_roi = img[ey:ey + eh, ex:ex + ew]  # the postiton of the left eye
 
-    if img is None:
-        print("Empty frame received.")
-        continue
+                sunglasses_small = cv2.resize(sunglasses, (ew, eh), interpolation=cv2.INTER_AREA)
+                gray_sunglasses = cv2.cvtColor(sunglasses_small, cv2.COLOR_BGR2GRAY)
 
-    img = detector.findPose(img)
-    if img is None:
-        print("Pose detection failed.")
-        continue
+                ret, mask = cv2.threshold(gray_sunglasses, 230, 255, cv2.THRESH_BINARY_INV)
+                mask_inv = cv2.bitwise_not(mask)
+                masked_face = cv2.bitwise_and(sunglasses_small, sunglasses_small, mask=mask)
 
-    lmList, bboxInfo = detector.findPosition(img, bboxWithHands=False, draw=False)
-    if lmList:
-        lm11 = lmList[11][1:3]
-        lm12 = lmList[12][1:3]
-        imgShirt = cv2.imread(os.path.join(shirtFolderPath, listShirts[imageNumber]), cv2.IMREAD_UNCHANGED)
+                masked_frame = cv2.bitwise_and(img_roi, img_roi, mask=mask_inv)
+                img[ey:ey + eh, ex:ex + ew] = cv2.add(masked_face, masked_frame)
 
-        widthOfShirt = int((lm11[0] - lm12[0]) * 262 / 190)
-        if widthOfShirt > 0:
-            imgShirt = cv2.resize(imgShirt, (widthOfShirt, int(widthOfShirt * 581 / 440)))
-        else:
-            print("Invalid width for resizing.")
-        currentScale = (lm11[0] - lm12[0]) / 190
-        offset = int(44 * currentScale), int(48 * currentScale)
-
-        try:
-            img = cvzone.overlayPNG(img, imgShirt, (lm12[0] - offset[0], lm12[1] - offset[1]))
-        except Exception as e:
-            print("Error overlaying image:", e)
-
-        img = cvzone.overlayPNG(img, imgButtonRight, (1074, 293))
-        img = cvzone.overlayPNG(img, imgButtonLeft, (72, 293))
-
-        if lmList[16][1] < 300:
-            counterRight += 1
-            cv2.ellipse(img, (139, 360), (66, 66), 0, 0, counterRight * selectionSpeed, (0, 255, 0), 20)
-            if counterRight * selectionSpeed > 360:
-                counterRight = 0
-                if imageNumber < len(listShirts) - 1:
-                    imageNumber += 1
-        elif lmList[15][1] > 900:
-            counterLeft += 1
-            cv2.ellipse(img, (1138, 360), (66, 66), 0, 0, counterLeft * selectionSpeed, (0, 255, 0), 20)
-            if counterLeft * selectionSpeed > 360:
-                counterLeft = 0
-                if imageNumber > 0:
-                    imageNumber -= 1
-        else:
-            counterRight = 0
-            counterLeft = 0
-
-    cv2.imshow("Image", img)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    cv2.imshow('img', img)
+    k = cv2.waitKey(30) & 0xff
+    if k == 27:
         break
 
 cap.release()
